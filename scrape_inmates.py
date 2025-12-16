@@ -139,16 +139,16 @@ def parse_inmate_details(html_file):
         header_row = table.find('tr', class_='bodysmallbold')
         if header_row:
              header_text = header_row.get_text(strip=True)
-             if "Comp Number" in header_text:
+             if "Comp No" in header_text:
                   # Found the detainer table
                   rows = table.find_all('tr')
-                  # Find which index "Comp Number" is at
+                  # Find which index "Comp No" is at
                   # We'll just parse all rows and if we find a value in that column index, extract it.
                   # Let's find columns
                   headers = header_row.find_all('td')
                   comp_idx = -1
                   for i, h in enumerate(headers):
-                      if "Comp Number" in h.get_text(strip=True):
+                      if "Comp No" in h.get_text(strip=True):
                           comp_idx = i
                           break
                   
@@ -209,7 +209,7 @@ if __name__ == "__main__":
     # Columns: Name, ICE#, Commitment Date, Citizen, Country of Birth, Charge Code, Detainer Comp Number
     print("Generating CSV...")
     with open("inmates.csv", "w", newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Name', 'ICE#', 'Commitment Date', 'Citizen', 'Country of Birth', 'Charge Code', 'Detainer Comp Number']
+        fieldnames = ['Name', 'Booking Number', 'ICE#', 'Commitment Date', 'Citizen', 'Country of Birth', 'Charge Code', 'Detainer Comp Number']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()
@@ -225,6 +225,7 @@ if __name__ == "__main__":
             
             writer.writerow({
                 'Name': inmate.get('name', ''),
+                'Booking Number': inmate.get('booking_number', ''),
                 'ICE#': details.get('ICE #', ''),
                 'Commitment Date': details.get('Commitment Date', ''),
                 'Citizen': details.get('Citizen', ''),
