@@ -45,3 +45,14 @@ class InmateLookup:
         url = self.url('IML')
         page = self.opener.open(url, data)
         return BeautifulSoup(page.read(), 'html.parser')
+    
+    def get_inmate_details(self, sys_id):
+        data = {
+            'flow_action': 'edit',
+            'sysID':sys_id,
+            'imgSysID':'0'
+        }
+        data = urlencode(data)
+        url = self.url('IML')
+        page = self.opener.open(url, data)
+        return BeautifulSoup(page.read(), 'html.parser')

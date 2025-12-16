@@ -20,9 +20,116 @@ def parse_inmates(html_file):
                 'date_of_birth': cells[3].get_text(strip=True),
                 'release_date': cells[4].get_text(strip=True)
             }
+            
+            onclick = row.get('onclick')
+            if onclick:
+                # onclick format: rowClicked('1','21860256738722','21860256738722')
+                # We want the second argument
+                parts = onclick.split("'")
+                if len(parts) >= 4:
+                    inmate['system_id'] = parts[3]
+                    
             inmates.append(inmate)
             
     return inmates
+
+def parse_inmate_details(html_file):
+    with open(html_file, 'r', encoding='utf-8') as f:
+        soup = BeautifulSoup(f, 'html.parser')
+        
+    data = {}
+
+    # Extract Name
+    name_div = soup.find('div', class_='header')
+    if name_div:
+        full_text = name_div.get_text(strip=True)
+        if full_text.startswith("Name:"):
+            data['name'] = full_text[5:].strip()
+
+    # Extract Key-Value Pairs (Personal Info, Inmate Info, Incarceration Info)
+    key_value_pairs = {}
+    bold_tds = soup.find_all('td', class_='bodysmallbold')
+    for td in bold_tds:
+        key = td.get_text(strip=True).rstrip(':')
+        # Value is usually next sibling td
+        next_td = td.find_next_sibling('td')
+        if next_td:
+            value = next_td.get_text(strip=True)
+            # avoid empty keys
+            if key:
+                 key_value_pairs[key] = value
+    
+    data['details'] = key_value_pairs
+    
+    # Parse List-based Tables (Charges, Bonds)
+    all_tables = soup.find_all('table')
+    
+    # Charges
+    charges = []
+    for table in all_tables:
+        # Look for a table that has "Case #" and "Offense Date" in a header row
+        # This avoids the "Charge Information" nested table issue
+        header_row = table.find('tr', class_='bodysmallbold')
+        if header_row:
+             header_text = header_row.get_text(strip=True)
+             if "Case #" in header_text and "Offense Date" in header_text and "Code" in header_text:
+                rows = table.find_all('tr')
+                for row in rows:
+                    # Skip the header row itself
+                    if row == header_row:
+                        continue
+                        
+                    cells = row.find_all('td')
+                    # Expecting at least 6 cells
+                    if len(cells) >= 6:
+                        # Ensure it's a data row (usually class 'bodysmall')
+                        # Check first cell content or just try to get text
+                        charge = {
+                             'case_number': cells[0].get_text(strip=True),
+                             'offense_date': cells[1].get_text(strip=True),
+                             'code': cells[2].get_text(strip=True),
+                             'description': cells[3].get_text(strip=True),
+                             'grade': cells[4].get_text(strip=True),
+                             'degree': cells[5].get_text(strip=True),
+                        }
+                        # Basic validity check (case number or date should exist)
+                        if charge['offense_date'] or charge['code']:
+                             charges.append(charge)
+                # Once found, break (assuming only one charge table per page)
+                data['charges'] = charges
+                break
+
+    # Bonds
+    bonds = []
+    for table in all_tables:
+        header_row = table.find('tr', class_='bodysmallbold')
+        if header_row:
+             header_text = header_row.get_text(strip=True)
+             if "Bond Type" in header_text and "Amount" in header_text:
+                  rows = table.find_all('tr')
+                  for row in rows:
+                      if row == header_row:
+                          continue
+                      
+                      cells = row.find_all('td')
+                      if len(cells) >= 9:
+                          bond = {
+                              'case_number': cells[0].get_text(strip=True),
+                              'bond_type': cells[1].get_text(strip=True),
+                              'amount': cells[2].get_text(strip=True),
+                              'status': cells[3].get_text(strip=True),
+                              'percent': cells[4].get_text(strip=True),
+                              'set_by': cells[5].get_text(strip=True),
+                              'additional': cells[6].get_text(strip=True),
+                              'set_date': cells[7].get_text(strip=True),
+                              'total': cells[8].get_text(strip=True),
+                          }
+                          if bond['bond_type']:
+                              bonds.append(bond)
+                  data['bonds'] = bonds
+                  break
+                  
+    return data
 
 if __name__ == "__main__":
     inmates = []
@@ -39,16 +146,29 @@ if __name__ == "__main__":
         else:
             raw_html = lookup.do_inmate_search_next(current_start)
         
-        with open("results.html", "w", encoding="utf-8") as f:
+        with open("inmate_search.html", "w", encoding="utf-8") as f:
             f.write(str(raw_html))
-        last_inmates = parse_inmates("results.html")
+        last_inmates = parse_inmates("inmate_search.html")
         inmates.extend(last_inmates)
         
         if len(last_inmates) == 0:
             break
-        
+            
         current_start = len(inmates) + 1
         print("Inmate Count: " + str(len(inmates)))
 
-    print(json.dumps(inmates, indent=4))
-    print("Total inmates: " + str(len(inmates)))
+    cur_inmate_count = 0
+    for inmate in inmates:
+        cur_inmate_count += 1
+        print("Getting inmate details " + str(cur_inmate_count) + " of " + str(len(inmates)))
+        raw_html = lookup.get_inmate_details(inmate['system_id'])
+        with open("inmate_details.html", "w", encoding="utf-8") as f:
+            f.write(str(raw_html))
+        
+        details = parse_inmate_details("inmate_details.html")
+        inmate.update(details)
+    
+    with open("inmates.json", "w", encoding="utf-8") as f:
+        json.dump(inmates, f, indent=4)
+        
+    print("Complete")
