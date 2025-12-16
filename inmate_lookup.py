@@ -35,3 +35,13 @@ class InmateLookup:
         url = self.url('IML')
         page = self.opener.open(url, data)
         return BeautifulSoup(page.read(), 'html.parser')
+    
+    def do_inmate_search_next(self, current_start):
+        data = {
+            'flow_action': 'next',
+            'currentStart':current_start
+        }
+        data = urlencode(data)
+        url = self.url('IML')
+        page = self.opener.open(url, data)
+        return BeautifulSoup(page.read(), 'html.parser')

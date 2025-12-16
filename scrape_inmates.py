@@ -25,12 +25,30 @@ def parse_inmates(html_file):
     return inmates
 
 if __name__ == "__main__":
+    inmates = []
+    last_inmates = []
+    current_start = 0
+
     lookup = InmateLookup()
     lookup.open_home_page()
-    result = lookup.do_inmate_search()
-    
-    with open("results.html", "w", encoding="utf-8") as f:
-        f.write(str(result))
+
+    while True:
+        raw_html = ''
+        if current_start == 0:
+            raw_html = lookup.do_inmate_search()
+        else:
+            raw_html = lookup.do_inmate_search_next(current_start)
         
-    inmates = parse_inmates("results.html")
+        with open("results.html", "w", encoding="utf-8") as f:
+            f.write(str(raw_html))
+        last_inmates = parse_inmates("results.html")
+        inmates.extend(last_inmates)
+        
+        if len(last_inmates) == 0:
+            break
+        
+        current_start = len(inmates) + 1
+        print("Inmate Count: " + str(len(inmates)))
+
     print(json.dumps(inmates, indent=4))
+    print("Total inmates: " + str(len(inmates)))
