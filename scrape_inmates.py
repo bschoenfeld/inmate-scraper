@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from inmate_lookup import InmateLookup
 import json
 import csv
+import os
 
 def parse_inmates(html_file):
     with open(html_file, 'r', encoding='utf-8') as f:
@@ -134,38 +135,69 @@ def parse_inmate_details(html_file):
     # Search for a table with "Comp Number" in the header
     data['detainers'] = []
     
-    # First, let's try to identify the table with "Comp Number" in its header row.
     for table in all_tables:
         header_row = table.find('tr', class_='bodysmallbold')
         if header_row:
-             header_text = header_row.get_text(strip=True)
-             if "Comp No" in header_text:
-                  # Found the detainer table
-                  rows = table.find_all('tr')
-                  # Find which index "Comp No" is at
-                  # We'll just parse all rows and if we find a value in that column index, extract it.
-                  # Let's find columns
-                  headers = header_row.find_all('td')
-                  comp_idx = -1
-                  for i, h in enumerate(headers):
-                      if "Comp No" in h.get_text(strip=True):
-                          comp_idx = i
-                          break
-                  
-                  if comp_idx != -1:
-                       for row in rows:
-                           if row == header_row:
-                               continue
-                           cells = row.find_all('td')
-                           if len(cells) > comp_idx:
-                               comp_num = cells[comp_idx].get_text(strip=True)
-                               if comp_num:
-                                   data['detainers'].append(comp_num)
-                  break
+            header_text = header_row.get_text(strip=True)
+            if "Comp No" in header_text:
+                # Found the detainer table
+                headers = header_row.find_all('td')
+                
+                # Map required columns to their indices
+                col_indices = {}
+                for i, h in enumerate(headers):
+                    text = h.get_text(strip=True)
+                    if "Comp No" in text:
+                        col_indices["Comp No"] = i
+                    elif "Comp Date" in text:
+                        col_indices["Comp Date"] = i
+                    elif "Issued By" in text:
+                        col_indices["Issued By"] = i
+                    elif "Set By" in text:
+                        col_indices["Set By"] = i
+                    elif "Total" in text:
+                        col_indices["Total"] = i
+
+                rows = table.find_all('tr')
+                
+                for row in rows:
+                    if row == header_row:
+                        continue
+                    
+                    # Skip rows that appear to be headers or footers
+                    row_text = row.get_text(strip=True)
+                    if "Grand Total" in row_text or "Detainer Information" in row_text:
+                        continue
+
+                    cells = row.find_all('td')
+                    
+                    # We need to ensure the row has enough cells to cover our columns
+                    # At least cover the Comp No column
+                    if "Comp No" in col_indices and len(cells) > col_indices["Comp No"]:
+                        detainer = {}
+                        # Extract data for each column found
+                        for key, index in col_indices.items():
+                            if len(cells) > index:
+                                detainer[key] = cells[index].get_text(strip=True)
+                            else:
+                                detainer[key] = ""
+                        
+                        # Only add if we have a valid Comp No
+                        if detainer.get("Comp No"):
+                            data['detainers'].append(detainer)
+                break
 
     return data
 
 if __name__ == "__main__":
+
+    # delete inmates.json
+    if os.path.exists("inmates.json"):
+        os.remove("inmates.json")
+    # delete inmates.csv
+    if os.path.exists("inmates.csv"):
+        os.remove("inmates.csv")
+
     inmates = []
     last_inmates = []
     current_start = 0
@@ -221,7 +253,14 @@ if __name__ == "__main__":
             charge_codes = "; ".join([c.get('code', '') for c in charges if c.get('code')])
             
             # Detainer Comp Number
-            detainer_comp_number = "; ".join(inmate.get('detainers', [])) 
+            detainer_list = inmate.get('detainers', [])
+            comp_numbers = []
+            for d in detainer_list:
+                if isinstance(d, dict):
+                    comp_numbers.append(d.get('Comp No', ''))
+                else:
+                    comp_numbers.append(str(d))
+            detainer_comp_number = "; ".join(comp_numbers) 
             
             writer.writerow({
                 'Name': inmate.get('name', ''),
