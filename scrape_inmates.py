@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 from inmate_lookup import InmateLookup
 import json
+import csv
 
 def parse_inmates(html_file):
     with open(html_file, 'r', encoding='utf-8') as f:
@@ -129,6 +130,39 @@ def parse_inmate_details(html_file):
                   data['bonds'] = bonds
                   break
                   
+    # Detainer Information
+    # Search for a table with "Comp Number" in the header
+    data['detainers'] = []
+    
+    # First, let's try to identify the table with "Comp Number" in its header row.
+    for table in all_tables:
+        header_row = table.find('tr', class_='bodysmallbold')
+        if header_row:
+             header_text = header_row.get_text(strip=True)
+             if "Comp Number" in header_text:
+                  # Found the detainer table
+                  rows = table.find_all('tr')
+                  # Find which index "Comp Number" is at
+                  # We'll just parse all rows and if we find a value in that column index, extract it.
+                  # Let's find columns
+                  headers = header_row.find_all('td')
+                  comp_idx = -1
+                  for i, h in enumerate(headers):
+                      if "Comp Number" in h.get_text(strip=True):
+                          comp_idx = i
+                          break
+                  
+                  if comp_idx != -1:
+                       for row in rows:
+                           if row == header_row:
+                               continue
+                           cells = row.find_all('td')
+                           if len(cells) > comp_idx:
+                               comp_num = cells[comp_idx].get_text(strip=True)
+                               if comp_num:
+                                   data['detainers'].append(comp_num)
+                  break
+
     return data
 
 if __name__ == "__main__":
@@ -171,4 +205,31 @@ if __name__ == "__main__":
     with open("inmates.json", "w", encoding="utf-8") as f:
         json.dump(inmates, f, indent=4)
         
-    print("Complete")
+    # Generate CSV
+    # Columns: Name, ICE#, Commitment Date, Citizen, Country of Birth, Charge Code, Detainer Comp Number
+    print("Generating CSV...")
+    with open("inmates.csv", "w", newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['Name', 'ICE#', 'Commitment Date', 'Citizen', 'Country of Birth', 'Charge Code', 'Detainer Comp Number']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for inmate in inmates:
+            details = inmate.get('details', {})
+            charges = inmate.get('charges', [])
+            
+            # Aggregate Charge Codes
+            charge_codes = "; ".join([c.get('code', '') for c in charges if c.get('code')])
+            
+            # Detainer Comp Number
+            detainer_comp_number = "; ".join(inmate.get('detainers', [])) 
+            
+            writer.writerow({
+                'Name': inmate.get('name', ''),
+                'ICE#': details.get('ICE #', ''),
+                'Commitment Date': details.get('Commitment Date', ''),
+                'Citizen': details.get('Citizen', ''),
+                'Country of Birth': details.get('Country of Birth', ''),
+                'Charge Code': charge_codes,
+                'Detainer Comp Number': detainer_comp_number
+            })
+    print("CSV Generated: inmates.csv")
