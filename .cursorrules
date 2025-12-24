@@ -1,0 +1,2 @@
+Always use the virtual environment at .venv when running python scripts.
+Command: .\.venv\Scripts\python.exe
