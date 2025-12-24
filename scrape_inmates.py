@@ -4,6 +4,7 @@ import json
 import csv
 import os
 import argparse
+import sqlite3
 
 def parse_inmates(html_file):
     with open(html_file, 'r', encoding='utf-8') as f:
@@ -236,17 +237,43 @@ def run_scraper():
         
     return inmates
 
-def generate_csv(inmates_data=None):
-    inmates = inmates_data
+def generate_csv():
+    inmates = []
     
-    # If not provided, try to load from existing file
-    if inmates is None:
-        if os.path.exists("inmates.json"):
-            with open("inmates.json", "r", encoding="utf-8") as f:
-                inmates = json.load(f)
-        else:
-            print("inmates.json not found. Please run with --scrape first to generate data.")
-            return
+    if not os.path.exists("inmates.db"):
+        print("inmates.db not found. Please run with --db to generate the database.")
+        return
+
+    print("Reading from Database...")
+    conn = sqlite3.connect('inmates.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT * FROM inmates")
+        rows = cursor.fetchall()
+        
+        for row in rows:
+            inmate = {
+                'system_id': row['system_id'],
+                'name': row['name'],
+                'booking_number': row['booking_number'],
+                'permanent_id': row['permanent_id'],
+                'date_of_birth': row['date_of_birth'],
+                'release_date': row['release_date'],
+                'details': json.loads(row['details_json']) if row['details_json'] else {},
+                'charges': json.loads(row['charges_json']) if row['charges_json'] else [],
+                'bonds': json.loads(row['bonds_json']) if row['bonds_json'] else [],
+                'detainers': json.loads(row['detainers_json']) if row['detainers_json'] else []
+            }
+            inmates.append(inmate)
+            
+    except sqlite3.OperationalError:
+        print("Error reading from database. Make sure the table exists.")
+        conn.close()
+        return
+
+    conn.close()
 
     # delete inmates.csv if it exists
     if os.path.exists("inmates.csv"):
@@ -289,19 +316,91 @@ def generate_csv(inmates_data=None):
             })
     print("CSV Generated: inmates.csv")
 
+
+def update_database(inmates_data=None):
+    inmates = inmates_data
+    
+    # If not provided, try to load from existing file
+    if inmates is None:
+        if os.path.exists("inmates.json"):
+            with open("inmates.json", "r", encoding="utf-8") as f:
+                inmates = json.load(f)
+        else:
+            print("inmates.json not found. Please run with --scrape first to generate data.")
+            return
+
+    print("Updating Database...")
+    conn = sqlite3.connect('inmates.db')
+    cursor = conn.cursor()
+
+    # Create table if not exists
+    # Storing complex structures as JSON text
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inmates (
+            system_id TEXT PRIMARY KEY,
+            name TEXT,
+            booking_number TEXT,
+            permanent_id TEXT,
+            date_of_birth TEXT,
+            release_date TEXT,
+            details_json TEXT,
+            charges_json TEXT,
+            bonds_json TEXT,
+            detainers_json TEXT
+        )
+    ''')
+
+    for inmate in inmates:
+        system_id = inmate.get('system_id')
+        if not system_id:
+            continue
+
+        # Prepare data for insertion
+        name = inmate.get('name')
+        booking_number = inmate.get('booking_number')
+        permanent_id = inmate.get('permanent_id')
+        date_of_birth = inmate.get('date_of_birth')
+        release_date = inmate.get('release_date')
+        
+        details_json = json.dumps(inmate.get('details', {}))
+        charges_json = json.dumps(inmate.get('charges', []))
+        bonds_json = json.dumps(inmate.get('bonds', []))
+        detainers_json = json.dumps(inmate.get('detainers', []))
+
+        # Insert or Replace
+        cursor.execute('''
+            INSERT OR REPLACE INTO inmates (
+                system_id, name, booking_number, permanent_id, date_of_birth, release_date,
+                details_json, charges_json, bonds_json, detainers_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            system_id, name, booking_number, permanent_id, date_of_birth, release_date,
+            details_json, charges_json, bonds_json, detainers_json
+        ))
+
+    conn.commit()
+    conn.close()
+    print("Database Updated: inmates.db")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Inmate Scraper')
     parser.add_argument('--scrape', action='store_true', help='Run the scraper')
     parser.add_argument('--csv', action='store_true', help='Turn the json into csv')
+    parser.add_argument('--db', action='store_true', help='Update the database with json data')
     args = parser.parse_args()
 
+    do_all = False
+
     # Nothing happens unless flags are provided
-    if not args.scrape and not args.csv:
-        exit()
+    if not args.scrape and not args.csv and not args.db:
+        do_all = True
 
     inmates_data = None
-    if args.scrape:
+    if args.scrape or do_all:
         inmates_data = run_scraper()
     
-    if args.csv:
-        generate_csv(inmates_data)
+    if args.db or do_all:
+        update_database(inmates_data)
+
+    if args.csv or do_all:
+        generate_csv()
