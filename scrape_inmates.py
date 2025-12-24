@@ -190,6 +190,105 @@ def parse_inmate_details(html_file):
 
     return data
 
+def run_scraper():
+    # delete inmates.json
+    if os.path.exists("inmates.json"):
+        os.remove("inmates.json")
+    
+    inmates = []
+    last_inmates = []
+    current_start = 0
+
+    lookup = InmateLookup()
+    lookup.open_home_page()
+
+    while True:
+        raw_html = ''
+        if current_start == 0:
+            raw_html = lookup.do_inmate_search()
+        else:
+            raw_html = lookup.do_inmate_search_next(current_start)
+        
+        with open("inmate_search.html", "w", encoding="utf-8") as f:
+            f.write(str(raw_html))
+        last_inmates = parse_inmates("inmate_search.html")
+        inmates.extend(last_inmates)
+        
+        if len(last_inmates) == 0:
+            break
+            
+        current_start = len(inmates) + 1
+        print("Inmate Count: " + str(len(inmates)))
+
+    cur_inmate_count = 0
+    for inmate in inmates:
+        cur_inmate_count += 1
+        print("Getting inmate details " + str(cur_inmate_count) + " of " + str(len(inmates)))
+        raw_html = lookup.get_inmate_details(inmate['system_id'])
+        with open("inmate_details.html", "w", encoding="utf-8") as f:
+            f.write(str(raw_html))
+        
+        details = parse_inmate_details("inmate_details.html")
+        inmate.update(details)
+    
+    with open("inmates.json", "w", encoding="utf-8") as f:
+        json.dump(inmates, f, indent=4)
+        
+    return inmates
+
+def generate_csv(inmates_data=None):
+    inmates = inmates_data
+    
+    # If not provided, try to load from existing file
+    if inmates is None:
+        if os.path.exists("inmates.json"):
+            with open("inmates.json", "r", encoding="utf-8") as f:
+                inmates = json.load(f)
+        else:
+            print("inmates.json not found. Please run with --scrape first to generate data.")
+            return
+
+    # delete inmates.csv if it exists
+    if os.path.exists("inmates.csv"):
+        os.remove("inmates.csv")
+
+    # Generate CSV
+    # Columns: Name, ICE#, Commitment Date, Citizen, Country of Birth, Charge Code, Detainer Comp Number
+    print("Generating CSV...")
+    with open("inmates.csv", "w", newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['Name', 'Booking Number', 'ICE#', 'Commitment Date', 'Citizen', 'Country of Birth', 'Charge Code', 'Detainer Comp Number']
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for inmate in inmates:
+            details = inmate.get('details', {})
+            charges = inmate.get('charges', [])
+            
+            # Aggregate Charge Codes
+            charge_codes = "; ".join([c.get('code', '') for c in charges if c.get('code')])
+            
+            # Detainer Comp Number
+            detainer_list = inmate.get('detainers', [])
+            comp_numbers = []
+            for d in detainer_list:
+                if isinstance(d, dict):
+                    comp_numbers.append(d.get('Comp No', ''))
+                else:
+                    comp_numbers.append(str(d))
+            detainer_comp_number = "; ".join(comp_numbers) 
+            
+            writer.writerow({
+                'Name': inmate.get('name', ''),
+                'Booking Number': inmate.get('booking_number', ''),
+                'ICE#': details.get('ICE #', ''),
+                'Commitment Date': details.get('Commitment Date', ''),
+                'Citizen': details.get('Citizen', ''),
+                'Country of Birth': details.get('Country of Birth', ''),
+                'Charge Code': charge_codes,
+                'Detainer Comp Number': detainer_comp_number
+            })
+    print("CSV Generated: inmates.csv")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Inmate Scraper')
     parser.add_argument('--scrape', action='store_true', help='Run the scraper')
@@ -200,98 +299,9 @@ if __name__ == "__main__":
     if not args.scrape and not args.csv:
         exit()
 
-    inmates = []
-
+    inmates_data = None
     if args.scrape:
-        # delete inmates.json
-        if os.path.exists("inmates.json"):
-            os.remove("inmates.json")
-        
-        last_inmates = []
-        current_start = 0
-
-        lookup = InmateLookup()
-        lookup.open_home_page()
-
-        while True:
-            raw_html = ''
-            if current_start == 0:
-                raw_html = lookup.do_inmate_search()
-            else:
-                raw_html = lookup.do_inmate_search_next(current_start)
-            
-            with open("inmate_search.html", "w", encoding="utf-8") as f:
-                f.write(str(raw_html))
-            last_inmates = parse_inmates("inmate_search.html")
-            inmates.extend(last_inmates)
-            
-            if len(last_inmates) == 0:
-                break
-                
-            current_start = len(inmates) + 1
-            print("Inmate Count: " + str(len(inmates)))
-
-        cur_inmate_count = 0
-        for inmate in inmates:
-            cur_inmate_count += 1
-            print("Getting inmate details " + str(cur_inmate_count) + " of " + str(len(inmates)))
-            raw_html = lookup.get_inmate_details(inmate['system_id'])
-            with open("inmate_details.html", "w", encoding="utf-8") as f:
-                f.write(str(raw_html))
-            
-            details = parse_inmate_details("inmate_details.html")
-            inmate.update(details)
-        
-        with open("inmates.json", "w", encoding="utf-8") as f:
-            json.dump(inmates, f, indent=4)
+        inmates_data = run_scraper()
     
     if args.csv:
-        # If we didn't scrape in this run, try to load from existing file
-        if not args.scrape:
-            if os.path.exists("inmates.json"):
-                with open("inmates.json", "r", encoding="utf-8") as f:
-                    inmates = json.load(f)
-            else:
-                print("inmates.json not found. Please run with --scrape first to generate data.")
-                exit()
-        
-        # delete inmates.csv if it exists
-        if os.path.exists("inmates.csv"):
-            os.remove("inmates.csv")
-
-        # Generate CSV
-        # Columns: Name, ICE#, Commitment Date, Citizen, Country of Birth, Charge Code, Detainer Comp Number
-        print("Generating CSV...")
-        with open("inmates.csv", "w", newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['Name', 'Booking Number', 'ICE#', 'Commitment Date', 'Citizen', 'Country of Birth', 'Charge Code', 'Detainer Comp Number']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-            writer.writeheader()
-            for inmate in inmates:
-                details = inmate.get('details', {})
-                charges = inmate.get('charges', [])
-                
-                # Aggregate Charge Codes
-                charge_codes = "; ".join([c.get('code', '') for c in charges if c.get('code')])
-                
-                # Detainer Comp Number
-                detainer_list = inmate.get('detainers', [])
-                comp_numbers = []
-                for d in detainer_list:
-                    if isinstance(d, dict):
-                        comp_numbers.append(d.get('Comp No', ''))
-                    else:
-                        comp_numbers.append(str(d))
-                detainer_comp_number = "; ".join(comp_numbers) 
-                
-                writer.writerow({
-                    'Name': inmate.get('name', ''),
-                    'Booking Number': inmate.get('booking_number', ''),
-                    'ICE#': details.get('ICE #', ''),
-                    'Commitment Date': details.get('Commitment Date', ''),
-                    'Citizen': details.get('Citizen', ''),
-                    'Country of Birth': details.get('Country of Birth', ''),
-                    'Charge Code': charge_codes,
-                    'Detainer Comp Number': detainer_comp_number
-                })
-        print("CSV Generated: inmates.csv")
+        generate_csv(inmates_data)
